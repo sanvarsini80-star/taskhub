@@ -3200,17 +3200,6 @@ class _NotificationCenterState extends State<NotificationCenter> {
                             shape: BoxShape.circle,
                           ),
                         ),
-                      IconButton(
-                        tooltip: 'Delete notification',
-                        onPressed: pendingRequest
-                            ? null
-                            : () => deleteOne('${row['id']}'),
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          size: 20,
-                          color: muted,
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -5071,7 +5060,7 @@ class _TasksPageState extends State<TasksPage> {
               : task.recurrence != null &&
                     _repeatFrequency(task.recurrence!) != 'None'
               ? 'Clear this occurrence from your task list today. It returns tomorrow, and its history stays in Calendar.'
-              : 'Remove it from your task list, but keep its history in Calendar. You can archive it separately if you want.',
+              : 'Clear this task from your active list. It will move to Archived and remain visible in Calendar with its history.',
         ),
         actions: [
           TextButton(
@@ -5089,7 +5078,7 @@ class _TasksPageState extends State<TasksPage> {
             VioletActionButton(
               onPressed: () =>
                   Navigator.pop(dialogContext, _TaskRemovalAction.clear),
-              child: const Text('Clear from today'),
+              child: const Text('Clear from task list'),
             ),
         ],
       ),
@@ -5110,18 +5099,27 @@ class _TasksPageState extends State<TasksPage> {
         final recurring =
             task.recurrence != null &&
             _repeatFrequency(task.recurrence!) != 'None';
-        final clearDate = recurring
-            ? DateTime.now()
-            : task.due?.toLocal() ?? DateTime.now();
-        await db.rpc(
-          'clear_task_occurrence',
-          params: {
-            'target_task': task.id,
-            'occurrence_date': DateFormat('yyyy-MM-dd').format(clearDate),
-          },
-        );
+        if (recurring) {
+          await db.rpc(
+            'clear_task_occurrence',
+            params: {
+              'target_task': task.id,
+              'occurrence_date': DateFormat(
+                'yyyy-MM-dd',
+              ).format(DateTime.now()),
+            },
+          );
+        } else {
+          // A one-off task is cleared by archiving it. This uses the stable
+          // v10 RPC and keeps the task and its calendar history intact.
+          await db.rpc('clear_task', params: {'target_task': task.id});
+        }
       }
-      if (action == _TaskRemovalAction.delete) {
+      final archiveClear =
+          action == _TaskRemovalAction.clear &&
+          (task.recurrence == null ||
+              _repeatFrequency(task.recurrence!) == 'None');
+      if (action == _TaskRemovalAction.delete || archiveClear) {
         await _cancelNativeTaskAlarms(task.id);
         await _syncRunningTimerNotification(await _loadRunningTasks());
       }
@@ -5134,7 +5132,7 @@ class _TasksPageState extends State<TasksPage> {
                   : task.recurrence != null &&
                         _repeatFrequency(task.recurrence!) != 'None'
                   ? 'Today’s occurrence was cleared. This task will return tomorrow.'
-                  : 'Task cleared from the list. Its history remains in Calendar.',
+                  : 'Task cleared from your active list and moved to Archived. Its history remains in Calendar.',
             ),
           ),
         );
